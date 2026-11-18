@@ -14,6 +14,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../common.dart';
+import '../../mobile/flurry/flurry_widgets.dart';
 import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import 'peer_card.dart';
@@ -187,6 +188,13 @@ class _PeersViewState extends State<_PeersView>
       child: Consumer<Peers>(builder: (context, peers, child) {
         if (peers.peers.isEmpty) {
           gFFI.peerTabModel.setCurrentTabCachedPeers([]);
+          if (!isDesktop && !isWebDesktop) {
+            return FlurryPolaroidEmptyState(
+              message: translate(
+                _emptyMessages[widget.peers.loadEvent] ?? 'Empty',
+              ),
+            );
+          }
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

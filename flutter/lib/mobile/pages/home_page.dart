@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_snow_overlay.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_theme.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_widgets.dart';
 import 'package:flutter_hbb/mobile/pages/server_page.dart';
 import 'package:flutter_hbb/mobile/pages/settings_page.dart';
 import 'package:flutter_hbb/web/settings_page.dart';
@@ -42,7 +45,18 @@ class HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    FlurryConfig.bindStorage(
+      reader: (k) => bind.mainGetLocalOption(key: k),
+      writer: (k, v) => bind.mainSetLocalOption(key: k, value: v),
+    );
+    FlurryConfig.copywritingNotifier.addListener(refreshPages);
     initPages();
+  }
+
+  @override
+  void dispose() {
+    FlurryConfig.copywritingNotifier.removeListener(refreshPages);
+    super.dispose();
   }
 
   void initPages() {
@@ -87,7 +101,7 @@ class HomePageState extends State<HomePage> {
                 .toList(),
             currentIndex: _selectedIndex,
             type: BottomNavigationBarType.fixed,
-            selectedItemColor: MyTheme.accent, //
+            selectedItemColor: FlurryColors.sakuraPink,
             unselectedItemColor: MyTheme.darkGray,
             onTap: (index) => setState(() {
               // close chat overlay when go chat page
@@ -102,7 +116,12 @@ class HomePageState extends State<HomePage> {
               }
             }),
           ),
-          body: _pages.elementAt(_selectedIndex),
+          body: Stack(
+            children: [
+              _pages.elementAt(_selectedIndex),
+              const FlurrySnowOverlay(),
+            ],
+          ),
         ));
   }
 
@@ -150,7 +169,10 @@ class HomePageState extends State<HomePage> {
         ],
       );
     }
-    return Text(bind.mainGetAppNameSync());
+    final appName = bind.mainGetAppNameSync();
+    return FlurryAppBarTitle(
+      title: appName == 'RustDesk' ? '雪美远控' : appName,
+    );
   }
 }
 

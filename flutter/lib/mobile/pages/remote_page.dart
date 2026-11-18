@@ -23,6 +23,10 @@ import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../models/shortcut_model.dart';
 import '../../utils/image.dart';
+import '../flurry/flurry_loading_widget.dart';
+import '../flurry/flurry_mascot_overlay.dart';
+import '../flurry/flurry_snow_overlay.dart';
+import '../flurry/flurry_theme.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
 
@@ -278,8 +282,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
         /// the Overlay key will be set with _blockableOverlayState in BlockableOverlay
         /// see override build() in [BlockableOverlay]
         state: _blockableOverlayState,
-        underlying: Container(
-          color: bgColor,
+        underlying: FlurryCanvasSplash(
+          backgroundColor: bgColor,
         ),
       );
 
@@ -514,7 +518,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                         : Icons.expand_less,
                     color: Colors.white,
                   ),
-                  backgroundColor: MyTheme.accent,
+                  backgroundColor: FlurryColors.sakuraPink,
                   onPressed: () {
                     setState(() {
                       if (keyboardIsVisible) {
@@ -604,10 +608,19 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   Widget getBottomAppBar() {
     final ffiModel = Provider.of<FfiModel>(context);
-    return BottomAppBar(
-      elevation: 10,
-      color: MyTheme.accent,
-      child: Row(
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: FlurryColors.sakuraNeon.withOpacity(0.38),
+            width: 1.2,
+          ),
+        ),
+      ),
+      child: BottomAppBar(
+        elevation: 10,
+        color: FlurryColors.starlightHud,
+        child: Row(
         mainAxisSize: MainAxisSize.max,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
@@ -650,7 +663,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                   icon: Icon(Icons.keyboard),
                                   onPressed: openKeyboard),
                               IconButton(
-                                color: Colors.white,
+                                color: _showGestureHelp
+                                    ? FlurryColors.sakuraNeon
+                                    : Colors.white,
                                 icon: Icon(gFFI.ffiModel.touchMode
                                     ? Icons.touch_app
                                     : Icons.mouse),
@@ -698,7 +713,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
               )),
         ],
       ),
-    );
+    ));
   }
 
   bool get showCursorPaint =>
@@ -768,6 +783,17 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
               ffi: gFFI,
             ));
           }
+          paints.add(const FlurrySnowOverlay());
+          paints.add(FlurryMascotOverlay(
+            onBlockedRectChanged: (oldRect, newRect) {
+              if (oldRect != null) {
+                gFFI.cursorModel.removeBlockedRect(oldRect);
+              }
+              if (newRect != null) {
+                gFFI.cursorModel.addBlockedRect(newRect);
+              }
+            },
+          ));
           return paints;
         }()));
   }
@@ -1015,7 +1041,9 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(5.0),
           ),
-          backgroundColor: active == true ? MyTheme.accent80 : null,
+          backgroundColor: active == true
+              ? FlurryColors.sakuraPink.withOpacity(0.82)
+              : null,
         ),
         child: icon != null
             ? Icon(icon, size: 14, color: Colors.white)

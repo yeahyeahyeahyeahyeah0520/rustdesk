@@ -16,6 +16,8 @@ import '../../common/widgets/autocomplete.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import '../flurry/flurry_theme.dart';
+import '../flurry/flurry_widgets.dart';
 import 'home_page.dart';
 
 /// Connection page for connecting to a remote peer.
@@ -86,6 +88,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
             delegate: SliverChildListDelegate([
           if (!bind.isCustomClient() && !isIOS)
             Obx(() => _buildUpdateUI(stateGlobal.updateUrl.value)),
+          if (!isWebDesktop) const FlurryWorkbenchBanner(),
           _buildRemoteIDTextField(),
         ])),
         SliverFillRemaining(
@@ -155,7 +158,11 @@ class _ConnectionPageState extends State<ConnectionPage> {
         child: Ink(
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.all(Radius.circular(13)),
+            borderRadius: const BorderRadius.all(Radius.circular(20)),
+            border: Border.all(
+              color: FlurryColors.sakuraPink.withOpacity(0.32),
+              width: 1.2,
+            ),
           ),
           child: Row(
             children: <Widget>[
@@ -233,8 +240,8 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         style: const TextStyle(
                           fontFamily: 'WorkSans',
                           fontWeight: FontWeight.bold,
-                          fontSize: 30,
-                          color: MyTheme.idColor,
+                          fontSize: 28,
+                          color: FlurryColors.iceMint,
                         ),
                         decoration: InputDecoration(
                           labelText: translate('Remote ID'),
@@ -334,13 +341,24 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         },
                         icon: Icon(Icons.clear, color: MyTheme.darkGray)),
                   )),
-              SizedBox(
-                width: 60,
-                height: 60,
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_forward,
-                      color: MyTheme.darkGray, size: 45),
-                  onPressed: onConnect,
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: Material(
+                    color: FlurryColors.sakuraPink,
+                    shape: const CircleBorder(),
+                    elevation: 2,
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      onPressed: onConnect,
+                    ),
+                  ),
                 ),
               ),
             ],

@@ -17,6 +17,7 @@ import '../../common/widgets/login.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import '../flurry/flurry_theme.dart';
 import '../widgets/deploy_dialog.dart';
 import '../../models/shortcut_model.dart';
 import '../widgets/dialog.dart';
@@ -736,6 +737,41 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     final settings = SettingsList(
       sections: [
         customClientSection,
+        SettingsSection(
+          title: const Text('❄️ 雪美主题工坊 (Flurry Studio)'),
+          tiles: [
+            SettingsTile.switchTile(
+              initialValue: FlurryConfig.enableCopywriting,
+              leading: const Icon(Icons.chat_bubble_outline_rounded,
+                  color: FlurryColors.sakuraPink),
+              title: const Text('“雪球~” 动森语录模式'),
+              description: const Text('将连接提示与空列表文案切换为雪美口头禅语气'),
+              onToggle: (v) {
+                setState(() => FlurryConfig.setCopywriting(v));
+              },
+            ),
+            SettingsTile.switchTile(
+              initialValue: FlurryConfig.enableMascotOverlay,
+              leading: const Icon(Icons.pets_rounded,
+                  color: FlurryColors.sakuraPink),
+              title: const Text('远控画面雪美陪伴桌宠'),
+              description: const Text('在远程控制电脑角落显示可拖拽、可贴边隐藏的雪美挂件'),
+              onToggle: (v) {
+                setState(() => FlurryConfig.setMascotOverlay(v));
+              },
+            ),
+            SettingsTile.switchTile(
+              initialValue: FlurryConfig.enableSnowfall,
+              leading: const Icon(Icons.ac_unit_rounded,
+                  color: FlurryColors.iceMint),
+              title: const Text('冬日轻柔飘雪特效'),
+              description: const Text('在主页与远控画布叠加无遮挡的低功耗雪花氛围层'),
+              onToggle: (v) {
+                setState(() => FlurryConfig.setSnowfall(v));
+              },
+            ),
+          ],
+        ),
         if (!bind.isDisableAccount())
           SettingsSection(
             title: Text(translate('Account')),

@@ -1,0 +1,255 @@
+name: Build FlurryDesk Android APK (雪美远控)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - flurry-main
+
+permissions:
+  contents: write
+
+env:
+  RUST_VERSION: "1.75"
+  CARGO_EXPAND_VERSION: "1.0.95"
+  FLUTTER_RUST_BRIDGE_VERSION: "1.80.1"
+  CARGO_NDK_VERSION: "3.1.2"
+  ANDROID_FLUTTER_VERSION: "3.24.5"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  NDK_VERSION: "r28c"
+  VERSION: "1.5.3"
+
+jobs:
+  generate-bridge:
+    name: Generate Flutter-Rust Bridge
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Cache generated bridge files
+        id: bridge-files-cache
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        with:
+          path: |
+            src/bridge_generated.rs
+            src/bridge_generated.io.rs
+            flutter/lib/generated_bridge.dart
+            flutter/lib/generated_bridge.freezed.dart
+            flutter/macos/Runner/bridge_generated.h
+            flutter/ios/Runner/bridge_generated.h
+          key: flurry-bridge-v1-${{ hashFiles('src/flutter_ffi.rs', 'Cargo.lock') }}
+
+      - name: Install prerequisites
+        if: steps.bridge-files-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake curl gcc git g++ libclang-dev libgtk-3-dev llvm-dev nasm ninja-build pkg-config wget
+
+      - name: Install Rust toolchain
+        if: steps.bridge-files-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: "rustfmt"
+
+      - name: Install Flutter 3.22.3 for bridge codegen
+        if: steps.bridge-files-cache.outputs.cache-hit != 'true'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: "3.22.3"
+          cache: true
+
+      - name: Run flutter_rust_bridge_codegen
+        if: steps.bridge-files-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cargo install cargo-expand --version ${{ env.CARGO_EXPAND_VERSION }} --locked
+          cargo install flutter_rust_bridge_codegen --version ${{ env.FLUTTER_RUST_BRIDGE_VERSION }} --features "uuid" --locked
+          sed -i -e 's/extended_text: 14.0.0/extended_text: 13.0.0/g' flutter/pubspec.yaml
+          pushd flutter && flutter pub get && popd
+          ~/.cargo/bin/flutter_rust_bridge_codegen \
+            --rust-input ./src/flutter_ffi.rs \
+            --dart-output ./flutter/lib/generated_bridge.dart \
+            --c-output ./flutter/macos/Runner/bridge_generated.h
+          cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
+          git checkout -- flutter/pubspec.yaml
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flurry-bridge-artifact
+          path: |
+            ./src/bridge_generated.rs
+            ./src/bridge_generated.io.rs
+            ./flutter/lib/generated_bridge.dart
+            ./flutter/lib/generated_bridge.freezed.dart
+            ./flutter/macos/Runner/bridge_generated.h
+            ./flutter/ios/Runner/bridge_generated.h
+
+  build-flurry-apk:
+    needs: [generate-bridge]
+    name: Package FlurryDesk arm64 APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flurry-bridge-artifact
+          path: ./
+
+      - name: Install JDK 17 & base build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake curl gcc-multilib git g++ g++-multilib \
+            libayatana-appindicator3-dev libasound2-dev libc6-dev \
+            libclang-dev libunwind-dev libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgtk-3-dev libpulse-dev \
+            libva-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxdo-dev libxfixes-dev llvm-dev nasm ninja-build \
+            openjdk-17-jdk-headless pkg-config wget
+
+      - name: Install Rust toolchain (needed by cargo metadata & NDK build)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: "rustfmt"
+
+      - name: Cache compiled arm64 jniLibs (.so)
+        id: jnilibs-cache
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        with:
+          path: flutter/android/app/src/main/jniLibs/arm64-v8a
+          key: flurry-jnilibs-arm64-v1-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'build.rs', 'vcpkg.json', 'src/**', 'libs/**') }}
+
+      - name: Setup Android NDK
+        if: steps.jnilibs-cache.outputs.cache-hit != 'true'
+        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+
+      - name: Setup vcpkg
+        if: steps.jnilibs-cache.outputs.cache-hit != 'true'
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Build vcpkg & librustdesk.so (arm64-v8a)
+        if: steps.jnilibs-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          ./flutter/build_android_deps.sh arm64-v8a
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} --locked
+          ./flutter/ndk_arm64.sh
+          mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
+          cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/
+          cp ./target/aarch64-linux-android/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
+
+      - name: Fetch cargo crate metadata for Gradle rustls-platform-verifier
+        if: steps.jnilibs-cache.outputs.cache-hit == 'true'
+        run: cargo fetch --locked
+
+      - name: Install & patch Flutter ${{ env.ANDROID_FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.ANDROID_FLUTTER_VERSION }}
+          cache: true
+
+      - name: Apply Flutter dropdown patch
+        shell: bash
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff || true
+
+      - name: Cache persistent signing keystore (for seamless phone OTA updates)
+        id: keystore-cache
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        with:
+          path: ~/.android/flurry-release.jks
+          key: flurry-signing-keystore-v1
+
+      - name: Ensure release keystore & build signed FlurryDesk APK
+        shell: bash
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+        run: |
+          export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/flurry-release.jks ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/flurry-release.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias flurry \
+              -storepass flurry123 -keypass flurry123 \
+              -dname "CN=FlurryDesk, OU=Mobile, O=Flurry, L=Island, S=ACNH, C=CN"
+          fi
+          cat > ./flutter/android/key.properties <<EOF
+          storePassword=flurry123
+          keyPassword=flurry123
+          keyAlias=flurry
+          storeFile=$HOME/.android/flurry-release.jks
+          EOF
+
+          sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
+          pushd flutter
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
+          popd
+          mkdir -p dist
+          cp flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/FlurryDesk-v${{ env.VERSION }}-arm64.apk"
+
+      - name: Upload APK to Workflow Artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: FlurryDesk-v${{ env.VERSION }}-arm64-apk
+          path: dist/FlurryDesk-v${{ env.VERSION }}-arm64.apk
+
+      - name: Publish APK to GitHub Releases (Direct Phone Download)
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          tag_name: flurry-latest
+          name: "❄️ 雪美远控 FlurryDesk (Android 最新安装包)"
+          body: |
+            ### 🐾 雪美远控 (FlurryDesk) Android 安装包
+            - **包名**：`com.flurry.rustdesk`（支持与手机上的原版 RustDesk 同时安装共存）
+            - **架构**：`arm64-v8a`（适配所有主流安卓手机）
+            - **使用说明**：手机浏览器直接点击下方 **`FlurryDesk-v1.5.3-arm64.apk`** 即可下载安装，输入电脑端 RustDesk 的 ID 与密码即可开始远程控制，雪球~ ❄️
+          prerelease: false
+          files: |
+            dist/FlurryDesk-v${{ env.VERSION }}-arm64.apk

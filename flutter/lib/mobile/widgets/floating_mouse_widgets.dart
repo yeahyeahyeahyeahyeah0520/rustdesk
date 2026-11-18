@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/remote_input.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_theme.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -25,10 +26,10 @@ const double _kSpaceBetweenLeftRightButtons = 40;
 const double _kLeftRightButtonWidth = 55;
 const double _kLeftRightButtonHeight = 40;
 const double _kBorderWidth = 1;
-final Color _kDefaultBorderColor = Colors.white.withOpacity(0.7);
-final Color _kDefaultColor = Colors.black.withOpacity(0.4);
-final Color _kTapDownColor = Colors.blue.withOpacity(0.7);
-final Color _kWidgetHighlightColor = Colors.white.withOpacity(0.9);
+final Color _kDefaultBorderColor = FlurryColors.sakuraNeon.withOpacity(0.72);
+final Color _kDefaultColor = FlurryColors.starlightHud.withOpacity(0.72);
+final Color _kTapDownColor = FlurryColors.sakuraPink.withOpacity(0.82);
+final Color _kWidgetHighlightColor = FlurryColors.sakuraSoft.withOpacity(0.95);
 const int _kInputTimerIntervalMillis = 100;
 
 class FloatingMouseWidgets extends StatefulWidget {
@@ -908,9 +909,13 @@ class _JoystickPainter extends CustomPainter {
     canvas.drawCircle(center, _joystickRadius, joystickPaint);
     canvas.drawCircle(center, _joystickRadius, borderPaint);
 
-    // Draw thumb
+    // Draw thumb with cute Flurry sakura paw center
     final thumbCenter = center + _offset;
     canvas.drawCircle(thumbCenter, _thumbRadius, thumbPaint);
+    final pawPaint = Paint()
+      ..color = FlurryColors.sakuraPink.withOpacity(0.75)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(thumbCenter, _thumbRadius * 0.42, pawPaint);
   }
 
   @override

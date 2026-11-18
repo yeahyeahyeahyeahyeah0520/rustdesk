@@ -1,263 +1,92 @@
-// This floating mouse widget simulates a physical mouse when connecting from mobile to desktop in touch mode.
+// ToDesk-style ergonomic floating virtual mouse widget for RustDesk mobile.
+// Provides a stationary floating remote controller with:
+// 1. Separate relative trackpad (swiping moves cursor without moving widget)
+// 2. Physical Left / Right buttons + Drag-Lock mode for text selection / window dragging
+// 3. Ergonomic vertical scroll wheel capsule (tap, hold, or vertical drag to scroll)
+// 4. Position drag handle & one-tap minimize to floating orb
+// 5. Sensitivity quick switch (1.0x / 1.4x / 2.0x)
 
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/common.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
-import 'package:flutter_hbb/utils/image.dart';
-import 'package:provider/provider.dart';
-
-const int _kDotCount = 60;
-const double _kDotAngle = 2 * pi / _kDotCount;
-final Color _kDefaultColor = Colors.grey.withOpacity(0.7);
-final Color _kDefaultHighlightColor = Colors.white24.withOpacity(0.7);
-final Color _kTapDownColor = Colors.blue.withOpacity(0.7);
-const double _baseMouseWidth = 112.0;
-const double _baseMouseHeight = 138.0;
-const double _kShowPressedScale = 1.2;
-const double kScaleMax = 1.8;
-const double kScaleMin = 0.8;
-
-double? _tryParseCoordinateFromEvt(Map<String, dynamic>? evt, String key) {
-  if (evt == null) return null;
-  final coord = evt[key];
-  if (coord == null) return null;
-  return double.tryParse(coord);
-}
+import 'package:flutter_hbb/models/platform_model.dart';
 
 class FloatingMouse extends StatefulWidget {
-  final FFI ffi;
+  final FFI? ffi;
+  final Function(int dx, int dy)? onTrackpadMove;
+  final Function(MouseButtons button, bool down)? onButtonAction;
+  final Function(int delta)? onScrollAction;
+
   const FloatingMouse({
     super.key,
-    required this.ffi,
+    this.ffi,
+    this.onTrackpadMove,
+    this.onButtonAction,
+    this.onScrollAction,
   });
 
   @override
   State<FloatingMouse> createState() => _FloatingMouseState();
 }
 
-class _CanvasScrollState {
-  static const double speedPressed = 3.0;
-  final InputModel inputModel;
-  final CanvasModel canvasModel;
-  final int _intervalMillis = 30;
-  Timer? _timer;
-  double _dx = 0;
-  double _dy = 0;
-  double _speed = 1.0;
-  Rect _displayRect = Rect.zero;
-  Offset _mouseGlobalPosition = Offset.zero;
-
-  _CanvasScrollState({required this.inputModel, required this.canvasModel});
-
-  double get step => 5.0 * canvasModel.scale;
-
-  set scrollX(double speed) {
-    _dx = step;
-    setSpeed(speed);
-  }
-
-  set scrollY(double speed) {
-    _dy = step;
-    setSpeed(speed);
-  }
-
-  void tryCancel() {
-    _dx = 0;
-    _dy = 0;
-    if (_timer == null) return;
-    _timer?.cancel();
-    _timer = null;
-  }
-
-  void setPressedSpeed() {
-    setSpeed(_speed > 0
-        ? _CanvasScrollState.speedPressed
-        : -_CanvasScrollState.speedPressed);
-  }
-
-  void setReleasedSpeed() {
-    setSpeed(_speed > 0 ? 1.0 : -1.0);
-  }
-
-  void setSpeed(double newSpeed) {
-    _speed = newSpeed;
-    if (_speed > 0) {
-      _speed = _speed.clamp(0.1, 10.0);
-    } else {
-      _speed = _speed.clamp(-10.0, -0.1);
-    }
-    if (_dx != 0) {
-      _dx = step * _speed;
-    } else if (_dy != 0) {
-      _dy = step * _speed;
-    }
-  }
-
-  void tryStart(Rect displayRect, Offset mouseGlobalPosition) {
-    _displayRect = displayRect;
-    _mouseGlobalPosition = mouseGlobalPosition;
-    if (_timer != null) return;
-    _timer = Timer.periodic(Duration(milliseconds: _intervalMillis), (timer) {
-      if (_dx == 0 && _dy == 0) {
-        tryCancel();
-      } else {
-        if (_dx != 0) {
-          canvasModel.panX(_dx);
-        }
-        if (_dy != 0) {
-          canvasModel.panY(_dy);
-        }
-        final evt = inputModel.processEventToPeer(
-            InputModel.getMouseEventMove(), _mouseGlobalPosition,
-            moveCanvas: false);
-        if (shouldCancelScrollTimer(evt)) {
-          tryCancel();
-        }
-      }
-    });
-  }
-
-  bool shouldCancelScrollTimer(Map<String, dynamic>? evt) {
-    if (evt == null) {
-      return true;
-    }
-    double s = canvasModel.scale;
-    assert(s > 0, 'canvasModel.scale should always be positive');
-    if (s <= 0) {
-      return true;
-    }
-    if (_dx != 0) {
-      final x = _tryParseCoordinateFromEvt(evt, 'x');
-      if (x == null) {
-        return true;
-      } else {
-        if (_dx < 0) {
-          if (isDoubleEqual(_displayRect.right - 1, x)) {
-            return true;
-          } else {
-            final dxDisplay = _dx / s;
-            if ((x - dxDisplay) > (_displayRect.right - 1)) {
-              canvasModel.panX((x - _displayRect.right + 1) * s);
-              return true;
-            }
-          }
-        } else {
-          if (isDoubleEqual(x, _displayRect.left)) {
-            return true;
-          } else {
-            final dxDisplay = _dx / s;
-            if ((x - dxDisplay) < _displayRect.left) {
-              canvasModel.panX((x - _displayRect.left) * s);
-              return true;
-            }
-          }
-        }
-      }
-    }
-    if (_dy != 0) {
-      final y = _tryParseCoordinateFromEvt(evt, 'y');
-      if (y == null) {
-        return true;
-      } else {
-        if (_dy < 0) {
-          if (isDoubleEqual(_displayRect.bottom - 1, y)) {
-            return true;
-          } else {
-            final dyDisplay = _dy / s;
-            if ((y - dyDisplay) > (_displayRect.bottom - 1)) {
-              canvasModel.panY((y - _displayRect.bottom + 1) * s);
-              return true;
-            }
-          }
-        } else {
-          if (isDoubleEqual(y, _displayRect.top)) {
-            return true;
-          } else {
-            final dyDisplay = _dy / s;
-            if ((y - dyDisplay) < _displayRect.top) {
-              canvasModel.panY((y - _displayRect.top) * s);
-              return true;
-            }
-          }
-        }
-      }
-    }
-    return false;
-  }
-}
-
-class _FloatingMouseState extends State<FloatingMouse> {
+class _FloatingMouseState extends State<FloatingMouse> with SingleTickerProviderStateMixin {
+  final GlobalKey _widgetKey = GlobalKey();
   Rect? _lastBlockedRect;
-  final GlobalKey _scrollWheelUpKey = GlobalKey();
-  final GlobalKey _scrollWheelDownKey = GlobalKey();
-  final GlobalKey _mouseWidgetKey = GlobalKey();
-  final GlobalKey _cursorPaintKey = GlobalKey();
 
+  // Widget dimensions
+  static const double _baseWidth = 142.0;
+  static const double _baseHeight = 224.0;
+  static const double _puckSize = 48.0;
+
+  // Widget positioning
   Offset _position = Offset.zero;
   bool _isInitialized = false;
-  double _baseMouseScale = 1.0;
-  double _mouseScale = 1.0;
-  bool _isExpanded = true;
-  bool _isScrolling = false;
-  Offset? _scrollCenter;
-  double _snappedPointerAngle = 0.0;
-  double? _lastSnappedAngle;
-  late final _CanvasScrollState _canvasScrollState;
+  bool _isCollapsed = false;
+
+  // Input & model references
+  InputModel? get _inputModel => widget.ffi?.inputModel;
+  CursorModel? get _cursorModel => widget.ffi?.cursorModel;
+  VirtualMouseMode? _virtualMouseMode;
+
+  // Mouse State
+  bool _leftDown = false;
+  bool _rightDown = false;
+  bool _midDown = false;
+  bool _dragLocked = false; // Drag & drop text selection lock
+
+  // Scroll wheel
+  Timer? _scrollTimer;
+  double _scrollDragAccumulator = 0.0;
+
+  // Trackpad movement
+  double _accumulatedDx = 0.0;
+  double _accumulatedDy = 0.0;
+  double _sensitivity = 1.3; // 1.0, 1.4, 2.0
+  DateTime? _lastTrackpadTapTime;
+
+  // Orientation tracking
   Orientation? _previousOrientation;
-  Timer? _collapseTimer;
-  late final VirtualMouseMode _virtualMouseMode;
-
-  void _resetCollapseTimer() {
-    _collapseTimer?.cancel();
-    if (_isExpanded) {
-      _collapseTimer = Timer(const Duration(seconds: 7), () {
-        if (mounted && _isExpanded) {
-          final minMouseScale = (_baseMouseScale * 0.3);
-          setState(() {
-            _mouseScale = minMouseScale;
-            _isExpanded = false;
-            _position += _expandOffset;
-          });
-        }
-      });
-    }
-  }
-
-  double get mouseWidth => _baseMouseWidth * _mouseScale;
-  double get mouseHeight => _baseMouseHeight * _mouseScale;
-
-  InputModel get _inputModel => widget.ffi.inputModel;
-  CursorModel get _cursorModel => widget.ffi.cursorModel;
-  CanvasModel get _canvasModel => widget.ffi.canvasModel;
-
-  Offset get _expandOffset =>
-      Offset(84 * _baseMouseScale, 12 * _baseMouseScale);
 
   @override
   void initState() {
     super.initState();
-    _virtualMouseMode = widget.ffi.ffiModel.virtualMouseMode;
-    _virtualMouseMode.addListener(_onVirtualMouseModeChanged);
-    _canvasScrollState =
-        _CanvasScrollState(inputModel: _inputModel, canvasModel: _canvasModel);
-    _cursorModel.blockEvents = false;
+    if (widget.ffi != null) {
+      _virtualMouseMode = widget.ffi!.ffiModel.virtualMouseMode;
+      _virtualMouseMode?.addListener(_onVirtualMouseModeChanged);
+      _cursorModel?.blockEvents = false;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _resetPosition();
-      _resetCollapseTimer();
+      _initPosition();
     });
   }
 
   void _onVirtualMouseModeChanged() {
     if (mounted) {
-      setState(() {
-        if (_virtualMouseMode.showVirtualMouse) {
-          _isExpanded = true;
-          _resetCollapseTimer();
-        }
-      });
+      setState(() {});
     }
   }
 
@@ -265,590 +94,495 @@ class _FloatingMouseState extends State<FloatingMouse> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final currentOrientation = MediaQuery.of(context).orientation;
-    if (_previousOrientation != null &&
-        _previousOrientation != currentOrientation) {
-      _resetPosition();
+    if (_previousOrientation != null && _previousOrientation != currentOrientation) {
+      _clampPosition();
     }
     _previousOrientation = currentOrientation;
   }
 
-  void _resetPosition() {
+  void _initPosition() {
+    final size = MediaQuery.of(context).size;
+    // Default position: bottom right corner, comfortable for right thumb
+    final double defaultX = size.width - _baseWidth - 16;
+    final double defaultY = size.height - _baseHeight - 32;
+
     setState(() {
-      final size = MediaQuery.of(context).size;
       _position = Offset(
-        (size.width - _baseMouseWidth * _mouseScale) / 2,
-        (size.height - _baseMouseHeight * _mouseScale) / 2,
+        defaultX.clamp(16.0, max(16.0, size.width - _baseWidth - 16)),
+        defaultY.clamp(32.0, max(32.0, size.height - _baseHeight - 32)),
       );
       _isInitialized = true;
     });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _updateBlockedRect();
     });
   }
 
-  @override
-  void dispose() {
-    if (_lastBlockedRect != null) {
-      _cursorModel.removeBlockedRect(_lastBlockedRect!);
-    }
-    _virtualMouseMode.removeListener(_onVirtualMouseModeChanged);
-    _canvasScrollState.tryCancel();
-    _cursorModel.blockEvents = false;
-    _collapseTimer?.cancel();
-    super.dispose();
+  void _clampPosition() {
+    final size = MediaQuery.of(context).size;
+    final currentW = _isCollapsed ? _puckSize : _baseWidth;
+    final currentH = _isCollapsed ? _puckSize : _baseHeight;
+
+    setState(() {
+      _position = Offset(
+        _position.dx.clamp(8.0, max(8.0, size.width - currentW - 8.0)),
+        _position.dy.clamp(24.0, max(24.0, size.height - currentH - 24.0)),
+      );
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateBlockedRect();
+    });
   }
 
   void _updateBlockedRect() {
-    final context = _mouseWidgetKey.currentContext;
-    if (context == null) return;
-    final renderBox = context.findRenderObject() as RenderBox?;
+    final ctx = _widgetKey.currentContext;
+    if (ctx == null) return;
+    final renderBox = ctx.findRenderObject() as RenderBox?;
     if (renderBox == null || !renderBox.attached) return;
 
     final newRect = renderBox.localToGlobal(Offset.zero) & renderBox.size;
-
     if (_lastBlockedRect != null) {
-      _cursorModel.removeBlockedRect(_lastBlockedRect!);
+      _cursorModel?.removeBlockedRect(_lastBlockedRect!);
     }
-    _cursorModel.addBlockedRect(newRect);
+    _cursorModel?.addBlockedRect(newRect);
     _lastBlockedRect = newRect;
   }
 
-  Offset _getMouseGlobalPosition() {
-    final RenderBox? renderBox =
-        _cursorPaintKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox != null) {
-      return renderBox.localToGlobal(Offset.zero);
-    } else {
-      return _position;
+  @override
+  void dispose() {
+    _scrollTimer?.cancel();
+    if (_lastBlockedRect != null) {
+      _cursorModel?.removeBlockedRect(_lastBlockedRect!);
+    }
+    _virtualMouseMode?.removeListener(_onVirtualMouseModeChanged);
+    _cursorModel?.blockEvents = false;
+
+    // Release mouse button if locked
+    if (_dragLocked) {
+      _inputModel?.tapUp(MouseButtons.left);
+      widget.onButtonAction?.call(MouseButtons.left, false);
+    }
+    super.dispose();
+  }
+
+  // --- Trackpad Relative Movement ---
+  void _onTrackpadPanUpdate(DragUpdateDetails details) {
+    _accumulatedDx += details.delta.dx * _sensitivity;
+    _accumulatedDy += details.delta.dy * _sensitivity;
+
+    final int sendX = _accumulatedDx.truncate();
+    final int sendY = _accumulatedDy.truncate();
+
+    if (sendX != 0 || sendY != 0) {
+      _accumulatedDx -= sendX;
+      _accumulatedDy -= sendY;
+
+      widget.onTrackpadMove?.call(sendX, sendY);
+
+      if (widget.ffi != null) {
+        bind.sessionSendMouse(
+          sessionId: widget.ffi!.sessionId,
+          msg: '{"type": "trackpad", "x": "$sendX", "y": "$sendY"}',
+        );
+      }
     }
   }
 
-  static Offset? _getPositionFromMouseRetEvt(Map<String, dynamic>? evt) {
-    final x = _tryParseCoordinateFromEvt(evt, 'x');
-    final y = _tryParseCoordinateFromEvt(evt, 'y');
-    if (x == null || y == null) {
-      return null;
-    }
-    return Offset(x, y);
-  }
+  void _onTrackpadTap() {
+    HapticFeedback.lightImpact();
+    final now = DateTime.now();
 
-  // Returns true if [value] is within 2.01 pixels of [edge].
-  // We need this near check because it can make the auto scroll easier to trigger and control.
-  bool _isValueNearEdge(double edge, double value) {
-    return (value - edge).abs() < 2.01;
-  }
-
-  bool _isValueAtEdge(double edge, double value) {
-    return (value - edge).abs() < 0.01;
-  }
-
-  bool _isValueAtOrOutsideEdge(double edge, double? value) {
-    // If value is null, then consider it outside the edge.
-    return value == null || isDoubleEqual(value, edge);
-  }
-
-  // If the mouse is very close to the edge of the display,
-  // we can only start auto scroll when the mouse is at the edge of the screen.
-  bool _shouldAutoScrollIfCursorNearRemoteEdge(double remoteEdge,
-      double remoteValue, double localEdge, double localValue) {
-    if ((remoteEdge - remoteValue).abs() < 100.0) {
-      if (!_isValueAtEdge(localEdge, localValue)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  void _onMoveUpdateDelta(Offset delta) {
-    _resetCollapseTimer();
-    final context = this.context;
-    final size = MediaQuery.of(context).size;
-    Offset newPosition = _position + delta;
-    double minX = 0;
-    double minY = 0;
-    double maxX = size.width - mouseWidth;
-    double maxY = size.height - mouseHeight;
-    newPosition = Offset(
-      newPosition.dx.clamp(minX, maxX),
-      newPosition.dy.clamp(minY, maxY),
-    );
-    setState(() {
-      final isPositionChanged = !(isDoubleEqual(newPosition.dx, _position.dx) &&
-          isDoubleEqual(newPosition.dy, _position.dy));
-      _position = newPosition;
-      if (!_isExpanded) {
-        return;
-      }
-
-      Offset? mouseGlobalPosition;
-      Offset? positionInRemoteDisplay;
-      if (isPositionChanged) {
-        mouseGlobalPosition = _getMouseGlobalPosition();
-        final evt = _inputModel.handleMouse(
-            InputModel.getMouseEventMove(), mouseGlobalPosition,
-            moveCanvas: false);
-        positionInRemoteDisplay = _getPositionFromMouseRetEvt(evt);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _updateBlockedRect();
-        });
-      }
-
-      // Get the display rect
-      final displayRect = widget.ffi.ffiModel.displaysRect();
-      if (displayRect == null) {
-        _canvasScrollState.tryCancel();
-        return;
-      }
-
-      // Get the mouse global position and position in remote display
-      mouseGlobalPosition ??= _getMouseGlobalPosition();
-      if (positionInRemoteDisplay == null) {
-        final evt = _inputModel.processEventToPeer(
-            InputModel.getMouseEventMove(), mouseGlobalPosition,
-            moveCanvas: false);
-        positionInRemoteDisplay = _getPositionFromMouseRetEvt(evt);
-      }
-
-      // Check if need to start auto canvas scroll
-      // If:
-      // 1. The mouse is near the edge of the screen.
-      // 2. The position in remote display is in the rect of the display.
-      // 3. If the remote cursor is near the edge of the remote display,
-      //    then the local mouse must be at the edge of the screen.
-      // Then start auto canvas scroll.
-      if (_isValueNearEdge(minX, _position.dx)) {
-        bool shouldStartScroll = true;
-        if (_isValueAtOrOutsideEdge(
-            displayRect.left, positionInRemoteDisplay?.dx)) {
-          shouldStartScroll = false;
-        }
-        if (positionInRemoteDisplay != null) {
-          if (!_shouldAutoScrollIfCursorNearRemoteEdge(displayRect.left,
-              positionInRemoteDisplay.dx, minX, _position.dx)) {
-            shouldStartScroll = false;
-          }
-        }
-        if (!shouldStartScroll) {
-          _canvasScrollState.tryCancel();
-          return;
-        }
-        _canvasScrollState.scrollX = 1.0 * _CanvasScrollState.speedPressed;
-      } else if (_isValueNearEdge(minY, _position.dy)) {
-        bool shouldStartScroll = true;
-        if (_isValueAtOrOutsideEdge(
-            displayRect.top, positionInRemoteDisplay?.dy)) {
-          shouldStartScroll = false;
-        }
-        if (positionInRemoteDisplay != null) {
-          if (!_shouldAutoScrollIfCursorNearRemoteEdge(displayRect.top,
-              positionInRemoteDisplay.dy, minY, _position.dy)) {
-            shouldStartScroll = false;
-          }
-        }
-        if (!shouldStartScroll) {
-          _canvasScrollState.tryCancel();
-          return;
-        }
-        _canvasScrollState.scrollY = 1.0 * _CanvasScrollState.speedPressed;
-      } else if (_isValueNearEdge(maxX, _position.dx)) {
-        bool shouldStartScroll = true;
-        if (_isValueAtOrOutsideEdge(
-            displayRect.right - 1, positionInRemoteDisplay?.dx)) {
-          shouldStartScroll = false;
-        }
-        if (positionInRemoteDisplay != null) {
-          if (!_shouldAutoScrollIfCursorNearRemoteEdge(displayRect.right - 1,
-              positionInRemoteDisplay.dx, maxX, _position.dx)) {
-            shouldStartScroll = false;
-          }
-        }
-        if (!shouldStartScroll) {
-          _canvasScrollState.tryCancel();
-          return;
-        }
-        _canvasScrollState.scrollX = -1.0 * _CanvasScrollState.speedPressed;
-      } else if (_isValueNearEdge(maxY, _position.dy)) {
-        bool shouldStartScroll = true;
-        if (_isValueAtOrOutsideEdge(
-            displayRect.bottom - 1, positionInRemoteDisplay?.dy)) {
-          shouldStartScroll = false;
-        }
-        if (positionInRemoteDisplay != null) {
-          if (!_shouldAutoScrollIfCursorNearRemoteEdge(displayRect.bottom - 1,
-              positionInRemoteDisplay.dy, maxY, _position.dy)) {
-            shouldStartScroll = false;
-          }
-        }
-        if (!shouldStartScroll) {
-          _canvasScrollState.tryCancel();
-          return;
-        }
-        _canvasScrollState.scrollY = -1.0 * _CanvasScrollState.speedPressed;
-      } else {
-        _canvasScrollState.tryCancel();
-        return;
-      }
-      _canvasScrollState.tryStart(displayRect, mouseGlobalPosition);
-    });
-  }
-
-  void _onDragHandleUpdate(DragUpdateDetails details) =>
-      _onMoveUpdateDelta(details.delta);
-
-  void _onBodyPointerMoveUpdate(PointerMoveEvent event) =>
-      _onMoveUpdateDelta(event.delta);
-
-  bool _containsPosition(GlobalKey key, Offset pos) {
-    final contextScroll = key.currentContext;
-    if (contextScroll == null) return false;
-    final RenderBox? scrollWheelBox =
-        contextScroll.findRenderObject() as RenderBox?;
-    if (scrollWheelBox == null || !scrollWheelBox.attached) return false;
-    Rect rect = scrollWheelBox.localToGlobal(Offset.zero) & scrollWheelBox.size;
-    return rect.contains(pos);
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    _resetCollapseTimer();
-    if (_isScrolling) return;
-    if (_containsPosition(_scrollWheelUpKey, event.position) ||
-        _containsPosition(_scrollWheelDownKey, event.position)) {
-      final contextMouse = _mouseWidgetKey.currentContext;
-      if (contextMouse == null) return;
-      final RenderBox? mouseBox = contextMouse.findRenderObject() as RenderBox?;
-      if (mouseBox == null || !mouseBox.attached) return;
-
-      // Only enter scroll mode when all RenderObjects are available.
-      final Offset mouseTopLeft = mouseBox.localToGlobal(Offset.zero);
-      final Size mouseSize = mouseBox.size;
-      final Offset center =
-          mouseTopLeft + Offset(mouseSize.width / 2, mouseSize.height / 2);
-
-      final vector = event.position - center;
-      final rawAngle = atan2(vector.dy, vector.dx);
-
-      final closestDotIndex = (rawAngle / _kDotAngle).round();
-      _lastSnappedAngle = closestDotIndex * _kDotAngle;
-
-      setState(() {
-        _isScrolling = true;
-        _cursorModel.blockEvents = true;
-        _scrollCenter = center;
-        _snappedPointerAngle = _lastSnappedAngle!;
-      });
-    }
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    _resetCollapseTimer();
-    if (!_isScrolling || _scrollCenter == null || _lastSnappedAngle == null) {
+    // Double tap triggers lock/drag mode
+    if (_lastTrackpadTapTime != null &&
+        now.difference(_lastTrackpadTapTime!).inMilliseconds < 280) {
+      _toggleDragLock();
+      _lastTrackpadTapTime = null;
       return;
     }
+    _lastTrackpadTapTime = now;
 
-    final touchPosition = event.position;
-    final vector = touchPosition - _scrollCenter!;
-    final rawCurrentAngle = atan2(vector.dy, vector.dx);
+    // Single tap on trackpad acts like left click
+    _leftDown = true;
+    _inputModel?.tapDown(MouseButtons.left);
+    widget.onButtonAction?.call(MouseButtons.left, true);
 
-    final closestDotIndex = (rawCurrentAngle / _kDotAngle).round();
-    final snappedCurrentAngle = closestDotIndex * _kDotAngle;
+    Future.delayed(const Duration(milliseconds: 40), () {
+      if (!_dragLocked) {
+        _leftDown = false;
+        _inputModel?.tapUp(MouseButtons.left);
+        widget.onButtonAction?.call(MouseButtons.left, false);
+      }
+    });
+  }
 
-    if (snappedCurrentAngle == _lastSnappedAngle) return;
+  // --- Drag Lock Toggle ---
+  void _toggleDragLock() {
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _dragLocked = !_dragLocked;
+      if (_dragLocked) {
+        _leftDown = true;
+        _inputModel?.tapDown(MouseButtons.left);
+        widget.onButtonAction?.call(MouseButtons.left, true);
+      } else {
+        _leftDown = false;
+        _inputModel?.tapUp(MouseButtons.left);
+        widget.onButtonAction?.call(MouseButtons.left, false);
+      }
+    });
+  }
 
-    double deltaAngle = snappedCurrentAngle - _lastSnappedAngle!;
+  // --- Scroll Wheel Actions ---
+  void _startContinuousScroll(int delta) {
+    HapticFeedback.selectionClick();
+    _inputModel?.scroll(delta);
+    widget.onScrollAction?.call(delta);
 
-    if (deltaAngle.abs() > pi) {
-      deltaAngle = (deltaAngle > 0) ? deltaAngle - 2 * pi : deltaAngle + 2 * pi;
+    _scrollTimer?.cancel();
+    _scrollTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+      _inputModel?.scroll(delta);
+      widget.onScrollAction?.call(delta);
+    });
+  }
+
+  void _stopContinuousScroll() {
+    _scrollTimer?.cancel();
+    _scrollTimer = null;
+  }
+
+  void _onWheelVerticalDrag(DragUpdateDetails details) {
+    _scrollDragAccumulator += details.delta.dy * -1.5;
+    if (_scrollDragAccumulator.abs() >= 8.0) {
+      final int steps = (_scrollDragAccumulator / 8.0).truncate();
+      _scrollDragAccumulator -= steps * 8.0;
+      final int delta = steps * 100;
+      _inputModel?.scroll(delta);
+      widget.onScrollAction?.call(delta);
     }
-
-    _lastSnappedAngle = snappedCurrentAngle;
-
-    setState(() {
-      _snappedPointerAngle = snappedCurrentAngle;
-      _inputModel.scroll(deltaAngle > 0 ? -1 : 1);
-    });
   }
 
-  void _tryCancelScrolling() {
-    _resetCollapseTimer();
-    if (!_isScrolling) return;
+  // --- Sensitivity Toggle ---
+  void _cycleSensitivity() {
+    HapticFeedback.selectionClick();
     setState(() {
-      _isScrolling = false;
-      _cursorModel.blockEvents = false;
-      _lastSnappedAngle = null;
-      _scrollCenter = null;
+      if (_sensitivity == 1.0) {
+        _sensitivity = 1.4;
+      } else if (_sensitivity == 1.4) {
+        _sensitivity = 2.0;
+      } else {
+        _sensitivity = 1.0;
+      }
     });
   }
-
-  void _handlePointerUp(PointerUpEvent event) => _tryCancelScrolling();
-  void _handlePointerCancel(PointerCancelEvent event) => _tryCancelScrolling();
 
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
       return const Offstage();
     }
-    final virtualMouseMode = _virtualMouseMode;
-    if (!virtualMouseMode.showVirtualMouse) {
+    if (_virtualMouseMode != null && !_virtualMouseMode!.showVirtualMouse) {
       return const Offstage();
     }
-    _baseMouseScale = virtualMouseMode.virtualMouseScale;
-    if (_isExpanded) {
-      _mouseScale = _baseMouseScale;
-    } else {
-      final minMouseScale = (_baseMouseScale * 0.3);
-      _mouseScale = minMouseScale;
-    }
-    return Listener(
-      onPointerDown: _isExpanded ? _handlePointerDown : null,
-      onPointerMove: _handlePointerMove,
-      onPointerUp: _handlePointerUp,
-      onPointerCancel: _handlePointerCancel,
-      behavior: HitTestBehavior.translucent,
-      child: Stack(
-        children: [
-          if (!_isScrolling)
-            Positioned(
-              left: _position.dx,
-              top: _position.dy,
-              child: _buildMouseWithHide(),
+
+    return Stack(
+      children: [
+        Positioned(
+          left: _position.dx,
+          top: _position.dy,
+          child: _isCollapsed ? _buildCollapsedPuck() : _buildFullMouseWidget(),
+        ),
+      ],
+    );
+  }
+
+  // --- Collapsed State (Floating Orb with Character Avatar) ---
+  Widget _buildCollapsedPuck() {
+    return GestureDetector(
+      key: _widgetKey,
+      onPanUpdate: (details) {
+        setState(() {
+          final size = MediaQuery.of(context).size;
+          _position = Offset(
+            (_position.dx + details.delta.dx).clamp(8.0, size.width - _puckSize - 8.0),
+            (_position.dy + details.delta.dy).clamp(24.0, size.height - _puckSize - 24.0),
+          );
+        });
+        _updateBlockedRect();
+      },
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        setState(() {
+          _isCollapsed = false;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _clampPosition();
+        });
+      },
+      child: Container(
+        width: _puckSize,
+        height: _puckSize,
+        decoration: BoxDecoration(
+          color: const Color(0xE61F232A),
+          shape: BoxShape.circle,
+          border: Border.all(color: const Color(0xFFFF80AB).withOpacity(0.6), width: 2.0),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFF80AB).withOpacity(0.35),
+              blurRadius: 12,
+              spreadRadius: 1,
+              offset: const Offset(0, 3),
             ),
-          if (_isScrolling && _scrollCenter != null)
-            Positioned.fill(
-              child: Builder(
-                builder: (context) {
-                  final RenderBox? customPaintBox =
-                      context.findRenderObject() as RenderBox?;
-                  if (customPaintBox == null || !customPaintBox.attached) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted && _isScrolling) setState(() {});
-                    });
-                    return const SizedBox.expand();
-                  }
-                  final Offset customPaintTopLeft =
-                      customPaintBox.localToGlobal(Offset.zero);
-                  final Offset localCenter =
-                      _scrollCenter! - customPaintTopLeft;
-                  return CustomPaint(
-                    painter: DottedCirclePainter(
-                      center: localCenter,
-                      pointerAngle: _snappedPointerAngle,
-                      scale: _mouseScale,
-                    ),
-                  );
-                },
+          ],
+        ),
+        child: ClipOval(
+          child: Image.asset(
+            'assets/flurry_avatar.png',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Image.asset(
+              'assets/custom_mouse_avatar.jpg',
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(
+                  Icons.pets_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Full ToDesk-Style Mouse Widget ---
+  Widget _buildFullMouseWidget() {
+    final Color surfaceColor = const Color(0xEB1A2130);
+    final Color buttonColor = const Color(0x30FFFFFF);
+    final Color activeColor = const Color(0xFFFF6F9C);
+
+    return Container(
+      key: _widgetKey,
+      width: _baseWidth,
+      height: _baseHeight,
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(
+          color: _dragLocked ? activeColor : Colors.white.withOpacity(0.18),
+          width: _dragLocked ? 2.0 : 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.45),
+            blurRadius: 16,
+            spreadRadius: 1,
+            offset: const Offset(0, 6),
+          ),
+          if (_dragLocked)
+            BoxShadow(
+              color: activeColor.withOpacity(0.35),
+              blurRadius: 12,
+              spreadRadius: 2,
+            ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // 1. Top Bar: Move Handle + Sensitivity + Minimize
+          _buildTopBar(),
+
+          // 2. Upper Body: Left Button, Wheel Capsule, Right Button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: SizedBox(
+              height: 72,
+              child: Row(
+                children: [
+                  // Left Mouse Button
+                  Expanded(
+                    child: _buildLeftButton(buttonColor, activeColor),
+                  ),
+
+                  const SizedBox(width: 6),
+
+                  // Center Scroll Wheel Capsule
+                  _buildWheelCapsule(),
+
+                  const SizedBox(width: 6),
+
+                  // Right Mouse Button
+                  Expanded(
+                    child: _buildRightButton(buttonColor, activeColor),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 3. Lower Body: Relative Trackpad Area
+          Expanded(
+            child: _buildTrackpadArea(),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMouseWithHide() {
-    double minMouseScale = (_baseMouseScale * 0.3);
-    if (!_isExpanded) {
-      return SizedBox(
-          width: mouseWidth,
-          height: mouseHeight,
-          child: GestureDetector(
-            onPanUpdate: _onDragHandleUpdate,
-            onTap: () {
-              setState(() {
-                _mouseScale = _baseMouseScale;
-                _isExpanded = true;
-                _position -= _expandOffset;
-              });
-              _resetCollapseTimer();
-            },
-            child: MouseBody(
-              scrollWheelUpKey: _scrollWheelUpKey,
-              scrollWheelDownKey: _scrollWheelDownKey,
-              mouseWidgetKey: _mouseWidgetKey,
-              inputModel: _isExpanded ? _inputModel : null,
-              scale: _mouseScale,
-              resetCollapseTimer: _resetCollapseTimer,
-            ),
-          ));
-    } else {
-      return SizedBox(
-        width: mouseWidth,
-        height: mouseHeight,
-        child: Column(
+  // --- Header / Drag Handle & Tool Buttons ---
+  Widget _buildTopBar() {
+    return GestureDetector(
+      onPanUpdate: (details) {
+        setState(() {
+          final size = MediaQuery.of(context).size;
+          _position = Offset(
+            (_position.dx + details.delta.dx).clamp(8.0, size.width - _baseWidth - 8.0),
+            (_position.dy + details.delta.dy).clamp(24.0, size.height - _baseHeight - 24.0),
+          );
+        });
+        _updateBlockedRect();
+      },
+      child: Container(
+        height: 28,
+        decoration: const BoxDecoration(
+          color: Color(0x1AFFFFFF),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            // Move Handle Icon + Character Mini Badge
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                CursorPaint(
-                  key: _cursorPaintKey,
-                  scale: _mouseScale,
+                Icon(
+                  Icons.drag_indicator_rounded,
+                  color: Colors.white.withOpacity(0.5),
+                  size: 16,
                 ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    _collapseTimer?.cancel();
-                    setState(() {
-                      _mouseScale = minMouseScale;
-                      _isExpanded = false;
-                      _position += _expandOffset;
-                    });
-                  },
-                  child: Container(
-                    width: 18 * _mouseScale,
-                    height: 18 * _mouseScale,
-                    child: Center(
-                      child: Container(
-                        width: 14 * _mouseScale,
-                        height: 14 * _mouseScale,
-                        decoration: const BoxDecoration(
-                          color: Colors.grey,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(Icons.close,
-                            color: Colors.white, size: 12 * _mouseScale),
-                      ),
+                const SizedBox(width: 4),
+                Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFFF80AB).withOpacity(0.6), width: 1),
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/custom_mouse_avatar.jpg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox(),
                     ),
                   ),
                 ),
               ],
             ),
-            Padding(
-                padding: EdgeInsets.only(left: 14 * _mouseScale),
-                child: MouseBody(
-                  scrollWheelUpKey: _scrollWheelUpKey,
-                  scrollWheelDownKey: _scrollWheelDownKey,
-                  mouseWidgetKey: _mouseWidgetKey,
-                  onPointerMoveUpdate: _onBodyPointerMoveUpdate,
-                  cancelCanvasScroll: _canvasScrollState.tryCancel,
-                  setCanvasScrollPressed: _canvasScrollState.setPressedSpeed,
-                  setCanvasScrollReleased: _canvasScrollState.setReleasedSpeed,
-                  inputModel: _isExpanded ? _inputModel : null,
-                  scale: _mouseScale,
-                  resetCollapseTimer: _resetCollapseTimer,
-                )),
+
+            // Sensitivity Toggle Badge
+            GestureDetector(
+              onTap: _cycleSensitivity,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.15)),
+                ),
+                child: Text(
+                  '${_sensitivity.toStringAsFixed(1)}x',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+
+            // Minimize Button
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                setState(() {
+                  _isCollapsed = true;
+                });
+                _updateBlockedRect();
+              },
+              child: Icon(
+                Icons.remove_rounded,
+                color: Colors.white.withOpacity(0.7),
+                size: 18,
+              ),
+            ),
           ],
         ),
-      );
-    }
-  }
-}
-
-class MouseBody extends StatefulWidget {
-  final GlobalKey scrollWheelUpKey;
-  final GlobalKey scrollWheelDownKey;
-  final GlobalKey mouseWidgetKey;
-  final Function(PointerMoveEvent)? onPointerMoveUpdate;
-  final Function()? cancelCanvasScroll;
-  final Function()? setCanvasScrollPressed;
-  final Function()? setCanvasScrollReleased;
-  final InputModel? inputModel;
-  final double scale;
-  final Function()? resetCollapseTimer;
-  const MouseBody({
-    super.key,
-    required this.scrollWheelUpKey,
-    required this.scrollWheelDownKey,
-    required this.mouseWidgetKey,
-    required this.scale,
-    this.inputModel,
-    this.onPointerMoveUpdate,
-    this.cancelCanvasScroll,
-    this.setCanvasScrollPressed,
-    this.setCanvasScrollReleased,
-    this.resetCollapseTimer,
-  });
-
-  @override
-  State<MouseBody> createState() => _MouseBodyState();
-}
-
-class WidgetScale {
-  final double scale;
-  final double translateScale;
-
-  const WidgetScale({required this.scale, required this.translateScale});
-
-  static WidgetScale getScale(bool down, double s) {
-    if (down) {
-      return WidgetScale(
-          scale: s * _kShowPressedScale,
-          translateScale: s * (_kShowPressedScale - 1.0) * 0.5);
-    } else {
-      return WidgetScale(scale: s, translateScale: 0.0);
-    }
-  }
-}
-
-class _MouseBodyState extends State<MouseBody> {
-  bool _leftDown = false;
-  bool _rightDown = false;
-  bool _midDown = false;
-  bool _dragDown = false;
-
-  Widget _buildScrollUpDown(GlobalKey key, IconData iconData, double s) {
-    return Container(
-      key: key,
-      height: 17 * s,
-      child: Icon(
-        iconData,
-        color: _kDefaultHighlightColor,
-        size: 14 * s,
       ),
     );
   }
 
-  Widget _buildScrollMidButton(double s) {
-    return Listener(
-      onPointerDown: widget.inputModel != null
-          ? (event) {
-              widget.resetCollapseTimer?.call();
-              setState(() {
-                _midDown = true;
-                widget.inputModel?.tapDown(MouseButtons.wheel);
-              });
-            }
-          : null,
-      onPointerUp: widget.inputModel != null
-          ? (event) {
-              setState(() {
-                _midDown = false;
-                widget.inputModel?.tapUp(MouseButtons.wheel);
-                widget.cancelCanvasScroll?.call();
-              });
-            }
-          : null,
-      onPointerCancel: widget.inputModel != null
-          ? (event) {
-              setState(() {
-                _midDown = false;
-                widget.inputModel?.tapUp(MouseButtons.wheel);
-                widget.cancelCanvasScroll?.call();
-              });
-            }
-          : null,
-      onPointerMove: widget.onPointerMoveUpdate,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 28 * s,
+  // --- Left Mouse Button ---
+  Widget _buildLeftButton(Color normalColor, Color activeColor) {
+    final bool isHighlighted = _leftDown || _dragLocked;
+
+    return GestureDetector(
+      onTapDown: (_) {
+        HapticFeedback.lightImpact();
+        if (!_dragLocked) {
+          setState(() => _leftDown = true);
+          _inputModel?.tapDown(MouseButtons.left);
+          widget.onButtonAction?.call(MouseButtons.left, true);
+        }
+      },
+      onTapUp: (_) {
+        if (!_dragLocked) {
+          setState(() => _leftDown = false);
+          _inputModel?.tapUp(MouseButtons.left);
+          widget.onButtonAction?.call(MouseButtons.left, false);
+        }
+      },
+      onTapCancel: () {
+        if (!_dragLocked) {
+          setState(() => _leftDown = false);
+          _inputModel?.tapUp(MouseButtons.left);
+          widget.onButtonAction?.call(MouseButtons.left, false);
+        }
+      },
+      onLongPress: _toggleDragLock,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        decoration: BoxDecoration(
+          color: isHighlighted ? activeColor : normalColor,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            bottomLeft: Radius.circular(10),
+          ),
+          border: Border.all(
+            color: isHighlighted ? Colors.white : Colors.white.withOpacity(0.12),
+          ),
+        ),
         child: Center(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 6 * s,
-                height: 2 * s,
-                color: _kDefaultHighlightColor,
+              Icon(
+                _dragLocked ? Icons.lock_rounded : Icons.touch_app_rounded,
+                color: Colors.white,
+                size: 18,
               ),
-              SizedBox(height: 3 * s),
-              Container(
-                width: 8 * s,
-                height: 2 * s,
-                color: _kDefaultHighlightColor,
-              ),
-              SizedBox(height: 3 * s),
-              Container(
-                width: 6 * s,
-                height: 2 * s,
-                color: _kDefaultHighlightColor,
+              const SizedBox(height: 2),
+              Text(
+                _dragLocked ? '锁定中' : '左键',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -857,353 +591,250 @@ class _MouseBodyState extends State<MouseBody> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.scale;
-    final leftScale = WidgetScale.getScale(_leftDown, s);
-    final rightScale = WidgetScale.getScale(_rightDown, s);
-    final midScale = WidgetScale.getScale(_midDown, s);
-    return Row(
-      children: [
-        SizedBox(
-          key: widget.mouseWidgetKey,
-          width: 80 * s,
-          height: 120 * s,
+  // --- Right Mouse Button ---
+  Widget _buildRightButton(Color normalColor, Color activeColor) {
+    return GestureDetector(
+      onTapDown: (_) {
+        HapticFeedback.lightImpact();
+        setState(() => _rightDown = true);
+        _inputModel?.tapDown(MouseButtons.right);
+        widget.onButtonAction?.call(MouseButtons.right, true);
+      },
+      onTapUp: (_) {
+        setState(() => _rightDown = false);
+        _inputModel?.tapUp(MouseButtons.right);
+        widget.onButtonAction?.call(MouseButtons.right, false);
+      },
+      onTapCancel: () {
+        setState(() => _rightDown = false);
+        _inputModel?.tapUp(MouseButtons.right);
+        widget.onButtonAction?.call(MouseButtons.right, false);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        decoration: BoxDecoration(
+          color: _rightDown ? activeColor : normalColor,
+          borderRadius: const BorderRadius.only(
+            topRight: Radius.circular(16),
+            bottomRight: Radius.circular(10),
+          ),
+          border: Border.all(
+            color: _rightDown ? Colors.white : Colors.white.withOpacity(0.12),
+          ),
+        ),
+        child: const Center(
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
-                height: 55 * s,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        // Left button
-                        Transform.translate(
-                          offset: Offset(
-                              -(80 - 24) * 0.5 * leftScale.translateScale,
-                              -32 * leftScale.translateScale),
-                          child: SizedBox(
-                            width: (80 - 24) * 0.5 * leftScale.scale,
-                            child: Listener(
-                              onPointerMove: widget.onPointerMoveUpdate,
-                              onPointerDown: widget.inputModel != null
-                                  ? (event) {
-                                      widget.resetCollapseTimer?.call();
-                                      setState(() {
-                                        _leftDown = true;
-                                        widget.inputModel
-                                            ?.tapDown(MouseButtons.left);
-                                      });
-                                    }
-                                  : null,
-                              onPointerUp: widget.inputModel != null
-                                  ? (event) => setState(() {
-                                        _leftDown = false;
-                                        widget.inputModel
-                                            ?.tapUp(MouseButtons.left);
-                                        widget.cancelCanvasScroll?.call();
-                                      })
-                                  : null,
-                              onPointerCancel: widget.inputModel != null
-                                  ? (event) => setState(() {
-                                        _leftDown = false;
-                                        widget.inputModel
-                                            ?.tapUp(MouseButtons.left);
-                                        widget.cancelCanvasScroll?.call();
-                                      })
-                                  : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: _leftDown
-                                      ? _kTapDownColor
-                                      : _kDefaultColor,
-                                  borderRadius: BorderRadius.only(
-                                      topLeft: Radius.circular(22 * s)),
-                                ),
-                                margin: EdgeInsets.only(right: 0.5 * s),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const Spacer(),
-                        Transform.translate(
-                          offset: Offset(
-                              (80 - 24) * 0.5 * rightScale.translateScale,
-                              -32 * rightScale.translateScale),
-                          child: SizedBox(
-                            width: (80 - 24) * 0.5 * rightScale.scale,
-                            child: Listener(
-                              onPointerMove: widget.onPointerMoveUpdate,
-                              onPointerDown: widget.inputModel != null
-                                  ? (event) {
-                                      widget.resetCollapseTimer?.call();
-                                      setState(() {
-                                        _rightDown = true;
-                                        widget.inputModel
-                                            ?.tapDown(MouseButtons.right);
-                                      });
-                                    }
-                                  : null,
-                              onPointerUp: widget.inputModel != null
-                                  ? (event) => setState(() {
-                                        _rightDown = false;
-                                        widget.inputModel
-                                            ?.tapUp(MouseButtons.right);
-                                        widget.cancelCanvasScroll?.call();
-                                      })
-                                  : null,
-                              onPointerCancel: widget.inputModel != null
-                                  ? (event) => setState(() {
-                                        _rightDown = false;
-                                        widget.inputModel
-                                            ?.tapUp(MouseButtons.right);
-                                        widget.cancelCanvasScroll?.call();
-                                      })
-                                  : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: _rightDown
-                                      ? _kTapDownColor
-                                      : _kDefaultColor,
-                                  borderRadius: BorderRadius.only(
-                                      topRight: Radius.circular(22 * s)),
-                                ),
-                                margin: EdgeInsets.only(left: 0.5 * s),
-                              ),
-                            ),
-                          ),
+              Icon(
+                Icons.menu_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+              SizedBox(height: 2),
+              Text(
+                '右键',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Scroll Wheel Capsule ---
+  Widget _buildWheelCapsule() {
+    return GestureDetector(
+      onVerticalDragUpdate: _onWheelVerticalDrag,
+      child: Container(
+        width: 32,
+        decoration: BoxDecoration(
+          color: const Color(0x40000000),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.2)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Scroll Up Button
+            GestureDetector(
+              onTapDown: (_) => _startContinuousScroll(120),
+              onTapUp: (_) => _stopContinuousScroll(),
+              onTapCancel: _stopContinuousScroll,
+              child: Container(
+                width: 28,
+                height: 20,
+                color: Colors.transparent,
+                child: const Icon(Icons.arrow_drop_up_rounded, color: Colors.white, size: 20),
+              ),
+            ),
+
+            // Middle Click Button
+            GestureDetector(
+              onTapDown: (_) {
+                HapticFeedback.lightImpact();
+                setState(() => _midDown = true);
+                _inputModel?.tapDown(MouseButtons.wheel);
+                widget.onButtonAction?.call(MouseButtons.wheel, true);
+              },
+              onTapUp: (_) {
+                setState(() => _midDown = false);
+                _inputModel?.tapUp(MouseButtons.wheel);
+                widget.onButtonAction?.call(MouseButtons.wheel, false);
+              },
+              onTapCancel: () {
+                setState(() => _midDown = false);
+                _inputModel?.tapUp(MouseButtons.wheel);
+                widget.onButtonAction?.call(MouseButtons.wheel, false);
+              },
+              child: Container(
+                width: 20,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: _midDown ? const Color(0xFF64DFDF) : Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Center(
+                  child: Container(
+                    width: 10,
+                    height: 2,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+
+            // Scroll Down Button
+            GestureDetector(
+              onTapDown: (_) => _startContinuousScroll(-120),
+              onTapUp: (_) => _stopContinuousScroll(),
+              onTapCancel: _stopContinuousScroll,
+              child: Container(
+                width: 28,
+                height: 20,
+                color: Colors.transparent,
+                child: const Icon(Icons.arrow_drop_down_rounded, color: Colors.white, size: 20),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Lower Body: Relative Touchpad ---
+  Widget _buildTrackpadArea() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+      child: GestureDetector(
+        onPanUpdate: _onTrackpadPanUpdate,
+        onTap: _onTrackpadTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0x24FFFFFF),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: Stack(
+            children: [
+              // Character watermark avatar in center of trackpad
+              Center(
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: _leftDown ? 0.45 : 0.22,
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.18),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFF80AB).withOpacity(0.15),
+                          blurRadius: 10,
                         ),
                       ],
                     ),
-                    // Middle function area overflows Row bottom
-                    Positioned(
-                      left: (80 * s - 22 * s) / 2,
-                      top: 0,
-                      child: Transform.translate(
-                        offset: Offset(0, -2 * s),
-                        child: Container(
-                          width: 22 * s,
-                          height: 67 * s,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.withOpacity(0.7),
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(12 * s),
-                              bottom: Radius.circular(16 * s),
-                            ),
-                          ),
-                          padding: EdgeInsets.symmetric(vertical: 2 * s),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildScrollUpDown(widget.scrollWheelUpKey,
-                                  Icons.keyboard_arrow_up, midScale.scale),
-                              _buildScrollMidButton(midScale.scale),
-                              _buildScrollUpDown(widget.scrollWheelDownKey,
-                                  Icons.keyboard_arrow_down, midScale.scale),
-                            ],
-                          ),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/flurry_avatar.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Image.asset(
+                          'assets/custom_mouse_avatar.jpg',
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox(),
                         ),
                       ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Center tactile dot grip texture over watermark
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildDot(),
+                        _buildDot(),
+                        _buildDot(),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildDot(),
+                        _buildDot(),
+                        _buildDot(),
+                      ],
                     ),
                   ],
                 ),
               ),
-              // Thin gap separates upper and lower parts
-              SizedBox(height: 1 * s),
-              // Bottom part: drag area (top middle indentation)
-              Expanded(
-                child: Listener(
-                  onPointerMove: widget.onPointerMoveUpdate,
-                  onPointerDown: widget.inputModel != null
-                      ? (event) {
-                          widget.resetCollapseTimer?.call();
-                          setState(() {
-                            _dragDown = true;
-                          });
-                          widget.setCanvasScrollPressed?.call();
-                        }
-                      : null,
-                  onPointerUp: widget.inputModel != null
-                      ? (event) {
-                          setState(() {
-                            _dragDown = false;
-                          });
-                          widget.setCanvasScrollReleased?.call();
-                        }
-                      : null,
-                  onPointerCancel: widget.inputModel != null
-                      ? (event) {
-                          setState(() {
-                            _dragDown = false;
-                          });
-                          widget.setCanvasScrollReleased?.call();
-                        }
-                      : null,
-                  behavior: HitTestBehavior.opaque,
-                  child: CustomPaint(
-                    painter: DragAreaTopIndentPainter(
-                        color: _dragDown ? _kTapDownColor : _kDefaultColor,
-                        scale: widget.scale),
-                    child: Container(
-                      width: 80 * s,
-                      alignment: Alignment.center,
-                      child: Transform.rotate(
-                        angle: pi / 2,
-                        child: Icon(Icons.drag_indicator,
-                            color: _kDefaultHighlightColor, size: 18 * s),
-                      ),
-                    ),
+
+              // Bottom hint
+              Positioned(
+                bottom: 6,
+                left: 0,
+                right: 0,
+                child: Text(
+                  _dragLocked ? '拖拽锁定中 (滑动框选/移动)' : '滑动移动光标 · 轻点左键',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _dragLocked ? const Color(0xFF82B1FF) : Colors.white.withOpacity(0.35),
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
             ],
           ),
         ),
-        const Spacer()
-      ],
+      ),
     );
   }
-}
 
-class DottedCirclePainter extends CustomPainter {
-  final Offset center;
-  final double pointerAngle;
-  final double scale;
-  final Offset? scrollWheelCenter;
-
-  DottedCirclePainter(
-      {required this.center,
-      required this.pointerAngle,
-      required this.scale,
-      this.scrollWheelCenter});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final radius = 48.0 * scale;
-    final circlePaint = Paint()
-      ..color = Colors.grey.shade400
-      ..style = PaintingStyle.fill;
-    final pointerPaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.fill;
-
-    const dotRadius = 2.5;
-    for (int i = 0; i < _kDotCount; i += 3) {
-      final angle = i * _kDotAngle;
-      final dotX = center.dx + radius * cos(angle);
-      final dotY = center.dy + radius * sin(angle);
-      canvas.drawCircle(Offset(dotX, dotY), dotRadius, circlePaint);
-    }
-
-    final pointerX = center.dx + radius * cos(pointerAngle);
-    final pointerY = center.dy + radius * sin(pointerAngle);
-    final pointerPosition = Offset(pointerX, pointerY);
-    canvas.drawCircle(pointerPosition, 8.0, pointerPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant DottedCirclePainter oldDelegate) {
-    return oldDelegate.pointerAngle != pointerAngle ||
-        oldDelegate.center != center ||
-        oldDelegate.scrollWheelCenter != scrollWheelCenter;
-  }
-}
-
-// Painter for the bottom center indentation of the drag area
-class BottomIndentPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.grey.withOpacity(0.7)
-      ..style = PaintingStyle.fill;
-    // Draw bottom semicircle
-    final center = Offset(size.width / 2, size.height);
-    canvas.drawArc(
-      Rect.fromCenter(center: center, width: size.width, height: size.height),
-      pi,
-      pi,
-      false,
-      paint,
-    );
-    // Use background color to carve a circular notch in the middle
-    final clearPaint = Paint()..blendMode = BlendMode.clear;
-    canvas.drawCircle(Offset(size.width / 2, size.height - 10), 10, clearPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// Painter for the top center indentation of the drag area
-class DragAreaTopIndentPainter extends CustomPainter {
-  final double scale;
-  final Color color;
-  DragAreaTopIndentPainter({required this.color, required this.scale});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Use saveLayer to make the hollow part transparent
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    canvas.saveLayer(Offset.zero & size, Paint());
-    // Draw drag area main body (rectangle + bottom rounded corners)
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final rrect = RRect.fromRectAndCorners(
-      rect,
-      bottomLeft: Radius.circular(40 * scale),
-      bottomRight: Radius.circular(40 * scale),
-    );
-    canvas.drawRRect(rrect, paint);
-    // Use BlendMode.dstOut to carve a smaller semicircular notch at the top center
-    final clearPaint = Paint()..blendMode = BlendMode.dstOut;
-    canvas.drawArc(
-      Rect.fromCenter(
-          center: Offset(size.width / 2, 0),
-          width: 25 * scale,
-          height: 20 * scale),
-      0,
-      pi,
-      false,
-      clearPaint,
-    );
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant DragAreaTopIndentPainter oldDelegate) {
-    return oldDelegate.color != color || oldDelegate.scale != scale;
-  }
-}
-
-class CursorPaint extends StatelessWidget {
-  final double scale;
-  CursorPaint({super.key, required this.scale});
-
-  @override
-  Widget build(BuildContext context) {
-    final cursorModel = Provider.of<CursorModel>(context);
-    double hotx = cursorModel.hotx;
-    double hoty = cursorModel.hoty;
-    var image = cursorModel.image;
-    if (image == null) {
-      if (preDefaultCursor.image != null) {
-        image = preDefaultCursor.image;
-        hotx = preDefaultCursor.image!.width / 2;
-        hoty = preDefaultCursor.image!.height / 2;
-      }
-    }
-    if (image == null) {
-      return const Offstage();
-    }
-    assert(scale > 0, 'scale should always be positive');
-    if (scale <= 0) {
-      return const Offstage();
-    }
-    return CustomPaint(
-      painter: ImagePainter(image: image, x: -hotx, y: -hoty, scale: scale),
+  Widget _buildDot() {
+    return Container(
+      width: 4,
+      height: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.35),
+        shape: BoxShape.circle,
+      ),
     );
   }
 }

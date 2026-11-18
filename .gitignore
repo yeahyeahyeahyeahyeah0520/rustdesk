@@ -17,6 +17,12 @@ cert.pfx
 *png
 *svg
 *jpg
+!flutter/assets/flurry*
+!flutter/assets/flurry_options/**
+!flutter/assets/logo*.png
+!flutter/assets/icon.png
+!flutter/assets/custom_mouse_avatar.*
+!flutter/android/app/src/main/res/**/*.png
 sciter.dll
 **pdb
 src/bridge_generated.rs

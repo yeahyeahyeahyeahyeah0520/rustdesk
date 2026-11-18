@@ -30,6 +30,9 @@ import 'package:window_size/window_size.dart' as window_size;
 
 import '../consts.dart';
 import 'common/widgets/overlay.dart';
+import 'mobile/flurry/flurry_loading_widget.dart';
+import 'mobile/flurry/flurry_strings.dart';
+import 'mobile/flurry/flurry_theme.dart';
 import 'mobile/pages/file_manager_page.dart';
 import 'mobile/pages/remote_page.dart';
 import 'mobile/pages/view_camera_page.dart';
@@ -369,7 +372,12 @@ class MyTheme {
     }),
   );
 
-  static ThemeData lightTheme = ThemeData(
+  static ThemeData _applyMobileLight(ThemeData t) =>
+      (isDesktop || isWebDesktop) ? t : FlurryTheme.applyLight(t);
+  static ThemeData _applyMobileDark(ThemeData t) =>
+      (isDesktop || isWebDesktop) ? t : FlurryTheme.applyDark(t);
+
+  static ThemeData lightTheme = _applyMobileLight(ThemeData(
     // https://stackoverflow.com/questions/77537315/after-upgrading-to-flutter-3-16-the-app-bar-background-color-button-size-and
     useMaterial3: false,
     brightness: Brightness.light,
@@ -467,8 +475,8 @@ class MyTheme {
       ColorThemeExtension.light,
       TabbarTheme.light,
     ],
-  );
-  static ThemeData darkTheme = ThemeData(
+  ));
+  static ThemeData darkTheme = _applyMobileDark(ThemeData(
     useMaterial3: false,
     brightness: Brightness.dark,
     hoverColor: Color.fromARGB(255, 45, 46, 53),
@@ -574,7 +582,7 @@ class MyTheme {
       ColorThemeExtension.dark,
       TabbarTheme.dark,
     ],
-  );
+  ));
 
   static ThemeMode getThemeModePreference() {
     return themeModeFromString(bind.mainGetLocalOption(key: kCommConfKeyTheme));
@@ -903,6 +911,18 @@ class OverlayDialogManager {
         if (onCancel != null) {
           onCancel();
         }
+      }
+
+      if (!isDesktop && !isWebDesktop) {
+        return CustomAlertDialog(
+          content: FlurryLoadingContent(
+            text: translate(text),
+            showCancel: showCancel,
+            cancelLabel: translate('Cancel'),
+            onCancel: cancel,
+          ),
+          onCancel: showCancel ? cancel : null,
+        );
       }
 
       return CustomAlertDialog(
@@ -1607,7 +1627,11 @@ String translate(String name) {
   if (name.startsWith('Failed to') && name.contains(': ')) {
     return name.split(': ').map((x) => translate(x)).join(': ');
   }
-  return platformFFI.translate(name, localeName);
+  final raw = platformFFI.translate(name, localeName);
+  if (!isDesktop && !isWebDesktop) {
+    return FlurryStrings.intercept(name, raw, locale: localeName);
+  }
+  return raw;
 }
 
 // This function must be kept the same as the one in rust and sciter code.

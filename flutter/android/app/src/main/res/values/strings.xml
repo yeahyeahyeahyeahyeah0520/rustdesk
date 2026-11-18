@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">RustDesk</string>
-    <string name="accessibility_service_description">Allow other devices to control your phone using virtual touch, when RustDesk screen sharing is established</string>
-    <string name="foreground_service_special_use_subtype">Keeps the RustDesk remote desktop host available for authorized unattended connections and foreground notifications without starting screen capture before user approval.</string>
+    <string name="app_name">雪美远控</string>
+    <string name="accessibility_service_description">开启后允许雪美远控在屏幕共享时接收虚拟触控操作</string>
+    <string name="foreground_service_special_use_subtype">保持雪美远控后台连接服务在线，以便随时响应已授权的远控请求。</string>
 </resources>
