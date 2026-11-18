@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Extracts prebuilt Android jniLibs (librustdesk.so & libc++_shared.so) from an official RustDesk Android APK
     so you can build the FlurryDesk (雪美远控) APK locally on Windows without setting up Android NDK + vcpkg.
@@ -8,7 +8,7 @@
 #>
 param(
     [string]$ApkPath = "",
-    [string]$DownloadUrl = "https://github.com/rustdesk/rustdesk/releases/download/nightly/rustdesk-1.3.9-aarch64-signed.apk"
+    [string]$DownloadUrl = "https://github.com/rustdesk/rustdesk/releases/download/nightly/rustdesk-1.5.3-aarch64-signed.apk"
 )
 
 $ErrorActionPreference = "Stop"
