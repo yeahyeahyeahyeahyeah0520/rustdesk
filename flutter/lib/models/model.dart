@@ -1850,7 +1850,7 @@ class FfiModel with ChangeNotifier {
 }
 
 class VirtualMouseMode with ChangeNotifier {
-  bool _showVirtualMouse = false;
+  bool _showVirtualMouse = true;
   double _virtualMouseScale = 1.0;
   bool _showVirtualJoystick = false;
 
@@ -1889,8 +1889,15 @@ class VirtualMouseMode with ChangeNotifier {
   }
 
   void loadOptions() {
-    _showVirtualMouse =
-        bind.mainGetLocalOption(key: kOptionShowVirtualMouse) == 'Y';
+    const initFlagKey = 'flurry-todesk-mouse-v2';
+    if (bind.mainGetLocalOption(key: initFlagKey) != '1') {
+      bind.mainSetLocalOption(key: initFlagKey, value: '1');
+      bind.mainSetLocalOption(key: kOptionShowVirtualMouse, value: 'Y');
+    }
+    final opt = bind.mainGetLocalOption(key: kOptionShowVirtualMouse);
+    // Default to true on fresh install ('') so the ToDesk virtual mouse appears automatically,
+    // while honoring explicit 'N' if the user disables it in Gesture Help.
+    _showVirtualMouse = _shouldShow() && (opt.isEmpty ? true : opt != 'N');
     _virtualMouseScale = double.tryParse(
             bind.mainGetLocalOption(key: kOptionVirtualMouseScale)) ??
         1.0;
@@ -1900,10 +1907,10 @@ class VirtualMouseMode with ChangeNotifier {
   }
 
   Future<void> toggleVirtualMouse() async {
+    final nextVal = showVirtualMouse ? 'N' : 'Y';
     await bind.mainSetLocalOption(
-        key: kOptionShowVirtualMouse, value: showVirtualMouse ? 'N' : 'Y');
-    setShowVirtualMouse(
-        bind.mainGetLocalOption(key: kOptionShowVirtualMouse) == 'Y');
+        key: kOptionShowVirtualMouse, value: nextVal);
+    setShowVirtualMouse(nextVal == 'Y');
   }
 
   Future<void> toggleVirtualJoystick() async {

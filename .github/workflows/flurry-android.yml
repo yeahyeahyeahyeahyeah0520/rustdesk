@@ -234,12 +234,14 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           tag_name: flurry-latest
-          name: "❄️ 雪美远控 FlurryDesk (Android 最新安装包)"
+          name: "❄️ 雪美远控 FlurryDesk + ToDesk 悬浮鼠标版 (Android 最新安装包)"
           body: |
-            ### 🐾 雪美远控 (FlurryDesk) Android 安装包
-            - **包名**：`com.flurry.rustdesk`（支持与手机上的原版 RustDesk 同时安装共存）
+            ### 🐾 雪美远控 (FlurryDesk) · 内置 ToDesk 风格雪美悬浮鼠标版
+            - **包名**：`com.flurry.rustdesk`（`v1.5.3+72`，可直接覆盖更新旧版，支持与原版 RustDesk 共存）
             - **架构**：`arm64-v8a`（适配所有主流安卓手机）
-            - **使用说明**：手机浏览器直接点击下方 **`FlurryDesk-v1.5.3-arm64.apk`** 即可下载安装，输入电脑端 RustDesk 的 ID 与密码即可开始远程控制，雪球~ ❄️
+            - **新增亮点**：
+              - 🖱️ **ToDesk 一体式悬浮虚拟鼠标**：鼠标模式与触控模式全局自动开启！右下角原地相对触控板（不遮挡画面）、零延迟左右中键、一键拖拽锁 `🔒`、`+1/-1` 标准滚轮刻度、四挡灵敏度切换，收起即化作雪美柔光小圆球！
+            - **使用说明**：手机浏览器直接点击下方 **`FlurryDesk-v1.5.3-arm64.apk`** 下载并覆盖安装，连入电脑即可在右下角直接使用雪美虚拟鼠标，雪球~ ❄️
           prerelease: false
           files: |
             dist/FlurryDesk-v${{ env.VERSION }}-arm64.apk

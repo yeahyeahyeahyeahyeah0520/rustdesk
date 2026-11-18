@@ -6,9 +6,8 @@ import 'package:flutter_hbb/mobile/flurry/flurry_mascot_overlay.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_snow_overlay.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_strings.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_theme.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_todesk_mouse_core.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_widgets.dart';
-import 'package:flutter_hbb/mobile/widgets/floating_mouse.dart';
-import 'package:flutter_hbb/models/input_model.dart';
 
 void main() {
   runApp(const MouseTestApp());
@@ -391,19 +390,19 @@ class _MouseSandboxScreenState extends State<MouseSandboxScreen> {
   Rect? _mascotBlockedRect;
   final ScrollController _scrollDemoController = ScrollController();
 
-  void _onTrackpadMove(int dx, int dy) {
+  void _onTrackpadMove(double dx, double dy) {
     setState(() {
       final size = MediaQuery.of(context).size;
       final newX = (_cursorPos.dx + dx).clamp(0.0, size.width - 12.0);
       final newY = (_cursorPos.dy + dy).clamp(0.0, size.height - 60.0);
       _cursorPos = Offset(newX, newY);
-      _lastAction = '触控板滑动: dx=$dx, dy=$dy';
+      _lastAction = '触控板滑动: dx=${dx.toStringAsFixed(1)}, dy=${dy.toStringAsFixed(1)}';
     });
   }
 
-  void _onButtonAction(MouseButtons button, bool down) {
+  void _onButtonAction(FlurryMouseButton button, bool down) {
     setState(() {
-      if (button == MouseButtons.left) {
+      if (button == FlurryMouseButton.left) {
         _isLeftPressed = down;
         if (down) {
           _clickCount++;
@@ -413,10 +412,10 @@ class _MouseSandboxScreenState extends State<MouseSandboxScreen> {
           _lastAction = '鼠标左键释放';
           _selectionStart = null;
         }
-      } else if (button == MouseButtons.right) {
+      } else if (button == FlurryMouseButton.right) {
         _isRightPressed = down;
         _lastAction = down ? '鼠标右键按下 (菜单)' : '鼠标右键释放';
-      } else if (button == MouseButtons.wheel) {
+      } else if (button == FlurryMouseButton.wheel) {
         _lastAction = down ? '鼠标中键按下' : '鼠标中键释放';
       }
     });
@@ -426,7 +425,7 @@ class _MouseSandboxScreenState extends State<MouseSandboxScreen> {
     setState(() {
       _lastAction = '滚轮滚动: delta=$delta';
       if (_scrollDemoController.hasClients) {
-        final target = (_scrollDemoController.offset - delta * 0.4)
+        final target = (_scrollDemoController.offset - delta * 42.0)
             .clamp(0.0, _scrollDemoController.position.maxScrollExtent);
         _scrollDemoController.animateTo(
           target,
@@ -486,10 +485,10 @@ class _MouseSandboxScreenState extends State<MouseSandboxScreen> {
             right: 20,
             child: _buildScrollTestBox(),
           ),
-          FloatingMouse(
-            onTrackpadMove: _onTrackpadMove,
+          FlurryToDeskMouseCore(
+            onTrackpadDelta: _onTrackpadMove,
             onButtonAction: _onButtonAction,
-            onScrollAction: _onScrollAction,
+            onScrollNotch: _onScrollAction,
           ),
           const FlurrySnowOverlay(),
           FlurryMascotOverlay(

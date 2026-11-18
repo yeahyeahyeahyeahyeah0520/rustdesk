@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_mascot_overlay.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_strings.dart';
 import 'package:flutter_hbb/mobile/flurry/flurry_theme.dart';
+import 'package:flutter_hbb/mobile/flurry/flurry_todesk_mouse_core.dart';
 
 void main() {
   setUp(() {
@@ -76,5 +77,92 @@ void main() {
     FlurryConfig.setMascotOverlay(false);
     await tester.pump();
     expect(latestBlockedRect, isNull);
+  });
+
+  testWidgets('ToDesk FloatingMouse dispatches stationary trackpad move, clicks, lock, and +1/-1 scroll',
+      (WidgetTester tester) async {
+    final moves = <(double, double)>[];
+    final buttons = <(FlurryMouseButton, bool)>[];
+    final scrolls = <int>[];
+    Rect? reportedRect;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 800,
+            child: Stack(
+              children: [
+                FlurryToDeskMouseCore(
+                  onRectChanged: (r) => reportedRect = r,
+                  onTrackpadDelta: (dx, dy) => moves.add((dx, dy)),
+                  onButtonAction: (btn, down) => buttons.add((btn, down)),
+                  onScrollNotch: (delta) => scrolls.add(delta),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(reportedRect, isNotNull);
+    // Verify stationary widget initial position
+    final initialTopLeft = tester.getTopLeft(find.byType(FlurryToDeskMouseCore));
+
+    // 1. Pan on trackpad: dispatches movement without moving widget!
+    final trackpadHint = find.textContaining('触控移光标');
+    expect(trackpadHint, findsOneWidget);
+    await tester.drag(trackpadHint, const Offset(30, -20));
+    await tester.pump();
+    expect(moves, isNotEmpty);
+    expect(tester.getTopLeft(find.byType(FlurryToDeskMouseCore)), equals(initialTopLeft));
+
+    // 2. Tap Left & Right buttons
+    await tester.tap(find.text('左键'));
+    await tester.pump();
+    expect(buttons, containsAllInOrder([(FlurryMouseButton.left, true), (FlurryMouseButton.left, false)]));
+
+    buttons.clear();
+    await tester.tap(find.text('右键'));
+    await tester.pump();
+    expect(buttons, containsAllInOrder([(FlurryMouseButton.right, true), (FlurryMouseButton.right, false)]));
+
+    // 3. Drag-Lock toggle via lock icon
+    buttons.clear();
+    await tester.tap(find.byIcon(Icons.lock_open_rounded));
+    await tester.pump();
+    expect(find.text('锁定中'), findsOneWidget);
+    expect(buttons, equals([(FlurryMouseButton.left, true)]));
+
+    // Tap left button to release lock
+    await tester.tap(find.text('锁定中'));
+    await tester.pump();
+    expect(find.text('左键'), findsOneWidget);
+    expect(buttons.last, equals((FlurryMouseButton.left, false)));
+
+    // 4. Scroll wheel notches (+1 / -1)
+    await tester.tap(find.byIcon(Icons.keyboard_arrow_up_rounded));
+    await tester.pump();
+    expect(scrolls, contains(1));
+
+    await tester.tap(find.byIcon(Icons.keyboard_arrow_down_rounded));
+    await tester.pump();
+    expect(scrolls, contains(-1));
+
+    // 5. Collapse to Flurry orb and expand back
+    await tester.tap(find.byIcon(Icons.close_fullscreen_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('左键'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.mouse_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('左键'), findsOneWidget);
   });
 }

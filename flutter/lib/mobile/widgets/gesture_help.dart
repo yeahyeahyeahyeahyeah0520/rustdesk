@@ -151,7 +151,7 @@ class _GestureHelpState extends State<GestureHelp> {
                           ],
                         ),
                       ),
-                      if (_touchMode && _virtualMouseMode.showVirtualMouse)
+                      if (_virtualMouseMode.showVirtualMouse)
                         Padding(
                           // Indent "Virtual mouse size"
                           padding: const EdgeInsets.only(left: 24.0),
@@ -201,55 +201,14 @@ class _GestureHelpState extends State<GestureHelp> {
                             ),
                           ),
                         ),
-                      if (!_touchMode && _virtualMouseMode.showVirtualMouse)
-                        Transform.translate(
-                          offset: const Offset(-10.0, -12.0),
-                          child: Padding(
-                              // Indent "Show virtual joystick"
-                              padding: const EdgeInsets.only(left: 24.0),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Checkbox(
-                                    value:
-                                        _virtualMouseMode.showVirtualJoystick,
-                                    onChanged: (value) async {
-                                      if (value == null) return;
-                                      await _virtualMouseMode
-                                          .toggleVirtualJoystick();
-                                      // Exit relative mouse mode when joystick is hidden
-                                      _exitRelativeMouseModeIf(
-                                          !_virtualMouseMode
-                                              .showVirtualJoystick);
-                                      setState(() {});
-                                    },
-                                  ),
-                                  InkWell(
-                                    onTap: () async {
-                                      await _virtualMouseMode
-                                          .toggleVirtualJoystick();
-                                      // Exit relative mouse mode when joystick is hidden
-                                      _exitRelativeMouseModeIf(
-                                          !_virtualMouseMode
-                                              .showVirtualJoystick);
-                                      setState(() {});
-                                    },
-                                    child: Text(
-                                        translate("Show virtual joystick")),
-                                  ),
-                                ],
-                              )),
-                        ),
-                      // Relative mouse mode option - only visible when joystick is shown
+                      // Relative mouse mode option (for 3D/gaming applications)
                       if (!_touchMode &&
                           _virtualMouseMode.showVirtualMouse &&
-                          _virtualMouseMode.showVirtualJoystick &&
                           widget.inputModel != null)
                         Obx(() => Transform.translate(
-                              offset: const Offset(-10.0, -24.0),
+                              offset: const Offset(-10.0, -12.0),
                               child: Padding(
-                                  // Indent further for 'Relative mouse mode'
-                                  padding: const EdgeInsets.only(left: 48.0),
+                                  padding: const EdgeInsets.only(left: 24.0),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
